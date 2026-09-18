@@ -130,5 +130,3 @@ We thank the authors of public datasets (e.g., BUSI, TN3K, CVC-ClinicDB, MoNuSeg
 ## 🐬 IAAx Dataset Download
 
 - **Baidu Netdisk:** [Download](你的百度网盘链接) (Access Code: 你的提取码)
-
-We also thank the open-source community for their valuable contributions.
