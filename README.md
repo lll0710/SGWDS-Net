@@ -22,8 +22,8 @@ data/
 
 **🐟🐟🐟 Notes 🐟🐟🐟:**
 
-1. **Validation Set**: It is recommended to provide an independent validation set (`val/`). If the `val/` directory is missing or empty, the data loader will automatically split a portion of the training set as the validation set.
-2. **Filename Matching**: The filenames of the images and their corresponding masks must be identical (e.g., `case_0001.nii.gz`).
+1. **Validation Set**: It is recommended to provide an independent validation set (val/). If the `val/` directory is missing or empty, the data loader will automatically split a portion of the training set as the validation set.
+2. **Filename Matching**: The filenames of the images and their corresponding masks must be identical (e.g., case_0001.nii.gz).
 
 ##  🐋Training
 ###🐋 1. Grayscale Images (Long or Width < 1000)
