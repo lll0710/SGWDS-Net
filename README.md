@@ -1,4 +1,4 @@
-# 🦈 LGFFM: A Localized and Globalized Frequency Fusion Model for Ultrasound Image Segmentation
+# 🦈 A Unified Framework for Segmenting Subtle Anatomical Structures
 
 ## 🐟 Dataset Format 🐟
 ```text
