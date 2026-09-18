@@ -1,11 +1,3 @@
-# -----------------------------------------------------------
-# train.py - SGWDSNet 训练脚本
-# 支持:
-# 1. 分割损失 (BCE + Dice)
-# 2. 梯度流场损失 (MSE + Cosine Similarity)
-# 3. 混合精度训练
-# 4. 深度监督
-# -----------------------------------------------------------
 import os
 import sys
 import argparse
@@ -30,19 +22,10 @@ import matplotlib.pyplot as plt
 from SGWDSNet import SGWDSNet, compute_gradient_flow_from_mask
 
 
-# ===================== 梯度流场GT计算 =====================
+
 
 def compute_flow_gt_batch(masks, device='cpu'):
-    """
-    批量计算梯度流场GT
-
-    参数:
-        masks: [B, 1, H, W] tensor
-        device: 计算设备
-
-    返回:
-        flow_gt: [B, 2, H, W] tensor
-    """
+   
     B, _, H, W = masks.shape
     flow_gt = torch.zeros(B, 2, H, W, dtype=torch.float32)
 
@@ -50,17 +33,16 @@ def compute_flow_gt_batch(masks, device='cpu'):
 
     for i in range(B):
         mask = masks_np[i]
-        if mask.max() > 0:  # 如果有前景
+        if mask.max() > 0:
             flow = compute_gradient_flow_from_mask(mask)
             flow_gt[i] = torch.from_numpy(flow)
 
     return flow_gt.to(device)
 
 
-# ===================== 在线数据增强 =====================
 
 class OnlineAugmentation:
-    """在线数据增强类 (在 [0, 255] 范围内进行增强)"""
+    
 
     def __init__(self,
                  rotation_range: tuple = (-30, 30),
@@ -102,16 +84,7 @@ class OnlineAugmentation:
         self.double_aug_prob = double_aug_prob
 
     def __call__(self, image: np.ndarray, mask: np.ndarray):
-        """
-        对 numpy 数组进行增强 (范围 [0, 255])
-
-        Args:
-            image: [H, W] 或 [H, W, C] 的 numpy 数组
-            mask: [H, W] 的 numpy 数组
-
-        Returns:
-            image, mask: 增强后的 numpy 数组
-        """
+       
         aug_count = 0
 
         if random.random() < self.prob_rotation:
@@ -189,11 +162,11 @@ class OnlineAugmentation:
     def _random_rotation(self, image, mask):
         from scipy.ndimage import rotate
         angle = random.uniform(*self.rotation_range)
-        # image 可能是 [H, W] 或 [H, W, C]
+        
         if image.ndim == 2:
             image = rotate(image, angle, reshape=False, mode='reflect', order=1)
         else:
-            # 对每个通道分别旋转
+           
             rotated_channels = []
             for c in range(image.shape[2]):
                 rotated_channels.append(rotate(image[:, :, c], angle, reshape=False, mode='reflect', order=1))
@@ -212,7 +185,7 @@ class OnlineAugmentation:
 
         new_h, new_w = int(h * scale), int(w * scale)
 
-        # 缩放图像
+        
         if image.ndim == 2:
             image_scaled = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         else:
@@ -220,7 +193,7 @@ class OnlineAugmentation:
 
         mask_scaled = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
 
-        # 裁剪或填充
+        
         if image.ndim == 2:
             image_out = np.zeros((h, w), dtype=image.dtype)
         else:
@@ -247,7 +220,7 @@ class OnlineAugmentation:
         return image_out, mask_out
 
     def _random_flip(self, image, mask):
-        flip_code = random.choice([-1, 0, 1])  # -1: 对角, 0: 垂直, 1: 水平
+        flip_code = random.choice([-1, 0, 1])  
         import cv2
         image = cv2.flip(image, flip_code)
         mask = cv2.flip(mask, flip_code)
@@ -280,20 +253,20 @@ class OnlineAugmentation:
         return image, mask
 
     def _adjust_brightness(self, image):
-        """亮度调整 (针对 [0, 255] 范围)"""
+        
         brightness = random.uniform(*self.brightness_range)
         image = np.clip(image * brightness, 0, 255)
         return image.astype(np.float32)
 
     def _adjust_contrast(self, image):
-        """对比度调整 (针对 [0, 255] 范围)"""
+        
         contrast = random.uniform(*self.contrast_range)
         mean = image.mean()
         image = np.clip((image - mean) * contrast + mean, 0, 255)
         return image.astype(np.float32)
 
     def _add_gaussian_noise(self, image):
-        """添加高斯噪声 (针对 [0, 255] 范围)"""
+        
         noise = np.random.normal(0, self.gaussian_noise_std * 255, image.shape)
         image = np.clip(image + noise, 0, 255)
         return image.astype(np.float32)
@@ -309,7 +282,6 @@ class OnlineAugmentation:
             return np.stack(blurred_channels, axis=2)
 
 
-# ===================== 学习率调度 =====================
 
 def poly_lr(epoch, max_epochs, initial_lr, exponent=0.9):
     return initial_lr * (1 - epoch / max_epochs) ** exponent
@@ -330,23 +302,22 @@ def update_learning_rate(optimizer, epoch, args):
     return lr
 
 
-# ===================== 前景过采样数据集 =====================
 
 class ForegroundOversampleDataset(Dataset):
-    """前景过采样数据集包装器"""
+    
 
     def __init__(self, base_dataset, oversample_percent=0.33):
         self.base_dataset = base_dataset
         self.oversample_percent = oversample_percent
         self.foreground_indices = []
 
-        print("正在识别前景样本...")
+        print("Identifying foreground samples...")
         for idx in tqdm(range(len(base_dataset))):
             _, mask = base_dataset[idx]
             if mask.sum() > 0:
                 self.foreground_indices.append(idx)
 
-        print(f"前景样本: {len(self.foreground_indices)}/{len(base_dataset)}")
+        print(f"Foreground samples: {len(self.foreground_indices)}/{len(base_dataset)}")
 
     def __len__(self):
         return len(self.base_dataset)
@@ -358,10 +329,9 @@ class ForegroundOversampleDataset(Dataset):
         return self.base_dataset[idx]
 
 
-# ===================== 损失函数 =====================
 
 class BCEDiceLoss(nn.Module):
-    """BCE + Dice 混合损失"""
+    
 
     def __init__(self, bce_weight=0.5, dice_weight=0.5):
         super().__init__()
@@ -384,13 +354,7 @@ class BCEDiceLoss(nn.Module):
 
 
 class GradientFlowLoss(nn.Module):
-    """
-    梯度流场损失
-
-    结合:
-    1. MSE损失: 预测流场与GT流场的均方误差
-    2. 余弦相似度损失: 方向一致性
-    """
+   
 
     def __init__(self, mse_weight=0.5, cos_weight=0.5):
         super().__init__()
@@ -398,29 +362,22 @@ class GradientFlowLoss(nn.Module):
         self.cos_weight = cos_weight
 
     def forward(self, pred_flow, gt_flow, mask=None):
-        """
-        参数:
-            pred_flow: [B, 2, H, W] 预测的梯度流场
-            gt_flow: [B, 2, H, W] GT梯度流场
-            mask: [B, 1, H, W] 可选，只在前景区域计算损失
-        """
-        # MSE损失
+       
         mse_loss = F.mse_loss(pred_flow, gt_flow, reduction='none')
 
         if mask is not None:
-            # 只在前景区域计算
+            
             mask_binary = (mask > 0.5).float()
             mse_loss = (mse_loss * mask_binary).sum() / (mask_binary.sum() + 1e-8)
         else:
             mse_loss = mse_loss.mean()
 
-        # 余弦相似度损失
-        # 展平为 [B*H*W, 2]
+       
         B, _, H, W = pred_flow.shape
-        pred_flat = pred_flow.permute(0, 2, 3, 1).reshape(-1, 2)  # [B*H*W, 2]
+        pred_flat = pred_flow.permute(0, 2, 3, 1).reshape(-1, 2)  
         gt_flat = gt_flow.permute(0, 2, 3, 1).reshape(-1, 2)
 
-        # 计算余弦相似度
+        
         cos_sim = F.cosine_similarity(pred_flat, gt_flat, dim=1)
         cos_loss = (1 - cos_sim).mean()
 
@@ -428,11 +385,7 @@ class GradientFlowLoss(nn.Module):
 
 
 class CellposeLoss(nn.Module):
-    """
-    Cellpose风格综合损失
-
-    L_total = α * L_seg + β * L_flow
-    """
+    
 
     def __init__(self, seg_weight=0.5, flow_weight=0.5, use_flow_loss=True):
         super().__init__()
@@ -444,41 +397,27 @@ class CellposeLoss(nn.Module):
         self.flow_loss = GradientFlowLoss()
 
     def forward(self, outputs, masks, flow_gt=None):
-        """
-        参数:
-            outputs: 模型输出字典 {'seg': ..., 'flow': ...}
-            masks: [B, 1, H, W] GT分割mask
-            flow_gt: [B, 2, H, W] GT梯度流场 (可选，如未提供则自动计算)
-        """
-        # 分割损失
+       
         seg_pred = outputs['seg']
         seg_loss = self.seg_loss(seg_pred, masks)
 
-        # 梯度流损失
+        
         if self.use_flow_loss and 'flow' in outputs and flow_gt is not None:
             flow_pred = outputs['flow']
             flow_loss = self.flow_loss(flow_pred, flow_gt, masks)
         else:
             flow_loss = torch.tensor(0.0, device=masks.device)
 
-        # 总损失
+        
         total_loss = self.seg_weight * seg_loss + self.flow_weight * flow_loss
 
         return total_loss, seg_loss, flow_loss
 
 
-# ===================== 评估指标 =====================
+
 
 def dice_coefficient(pred, target, threshold=0.5, is_sigmoid=False):
-    """
-    计算Dice系数
-
-    Args:
-        pred: 预测值（logits或概率）
-        target: 目标值
-        threshold: 阈值
-        is_sigmoid: pred是否已经过sigmoid（如果为True则不再sigmoid）
-    """
+    
     if is_sigmoid:
         pred_binary = (pred > threshold).float()
     else:
@@ -491,15 +430,7 @@ def dice_coefficient(pred, target, threshold=0.5, is_sigmoid=False):
 
 
 def iou_coefficient(pred, target, threshold=0.5, is_sigmoid=False):
-    """
-    计算IoU系数
-
-    Args:
-        pred: 预测值（logits或概率）
-        target: 目标值
-        threshold: 阈值
-        is_sigmoid: pred是否已经过sigmoid（如果为True则不再sigmoid）
-    """
+   
     if is_sigmoid:
         pred_binary = (pred > threshold).float()
     else:
@@ -512,10 +443,10 @@ def iou_coefficient(pred, target, threshold=0.5, is_sigmoid=False):
     return (intersection + smooth) / (union + smooth)
 
 
-# ===================== 数据集 =====================
+
 
 class TN3KDataset(Dataset):
-    """TN3K 甲状腺分割数据集"""
+   
 
     def __init__(self, image_dir, mask_dir, transform=None, img_size=256, is_train=True, augmentation=None, in_channels=1):
         self.image_dir = image_dir
@@ -524,12 +455,12 @@ class TN3KDataset(Dataset):
         self.img_size = img_size
         self.is_train = is_train
         self.augmentation = augmentation
-        self.in_channels = in_channels  # 新增：输入通道数 (1=灰度, 3=RGB)
+        self.in_channels = in_channels  
 
         self.image_files = [f for f in os.listdir(image_dir)
                            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'))]
 
-        print(f"找到 {len(self.image_files)} 张图像")
+        print(f"Found {len(self.image_files)} images")
 
     def __len__(self):
         return len(self.image_files)
@@ -538,11 +469,11 @@ class TN3KDataset(Dataset):
         img_name = self.image_files[idx]
         img_path = os.path.join(self.image_dir, img_name)
 
-        # 根据 in_channels 决定读取方式
+        
         if self.in_channels == 1:
-            image = Image.open(img_path).convert('L')  # 灰度图
+            image = Image.open(img_path).convert('L')  
         else:
-            image = Image.open(img_path).convert('RGB')  # RGB图
+            image = Image.open(img_path).convert('RGB')  
         image = np.array(image)
 
         base_name = os.path.splitext(img_name)[0]
@@ -558,14 +489,14 @@ class TN3KDataset(Dataset):
                 break
 
         if mask_name is None:
-            raise FileNotFoundError(f"找不到 {img_name} 对应的mask")
+            raise FileNotFoundError(f"Mask not found for {img_name}")
 
         mask = Image.open(mask_name).convert('L')
         mask = np.array(mask)
 
         mask = (mask > 127).astype(np.float32)
 
-        # 调整图像尺寸（如果指定了img_size且大于0）
+        
         if self.img_size > 0:
             image = Image.fromarray(image)
             mask = Image.fromarray(mask)
@@ -577,19 +508,19 @@ class TN3KDataset(Dataset):
             image = image.astype(np.float32)
             mask = mask.astype(np.float32)
 
-        # 数据增强（在归一化前进行，此时数据范围是 [0, 255]）
+        
         if self.is_train and self.augmentation is not None:
             image, mask = self.augmentation(image, mask)
 
-        # 数据增强后再归一化
+        
         if self.in_channels == 1:
             mean = image.mean()
             std = image.std()
             image = (image - mean) / (std + 1e-8)
             image = image.astype(np.float32)
-            image = torch.from_numpy(image).unsqueeze(0)  # [1, H, W]
+            image = torch.from_numpy(image).unsqueeze(0)  
         else:
-            # RGB: 对每个通道分别归一化
+            
             for c in range(3):
                 mean = image[:, :, c].mean()
                 std = image[:, :, c].std()
@@ -603,26 +534,13 @@ class TN3KDataset(Dataset):
 
 
 class PatchDataset(Dataset):
-    """
-    随机裁剪Patch数据集 - 每张图裁剪固定数量的patch
-    用于大图像的小目标分割训练
-    """
+   
 
     def __init__(self, image_dir, mask_dir, patch_size=256,
                  patches_per_image=10,
                  ensure_foreground_ratio=0.7,
                  in_channels=1, augmentation=None, is_train=True):
-        """
-        Args:
-            image_dir: 图像目录
-            mask_dir: mask目录
-            patch_size: patch大小
-            patches_per_image: 每张图裁剪的patch数量
-            ensure_foreground_ratio: 保证裁剪到前景的概率
-            in_channels: 输入通道数 (1=灰度, 3=RGB)
-            augmentation: 数据增强器
-            is_train: 是否训练模式
-        """
+       
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.patch_size = patch_size
@@ -635,12 +553,12 @@ class PatchDataset(Dataset):
         self.image_files = [f for f in os.listdir(image_dir)
                            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'))]
 
-        # 预加载所有图像和mask到内存（如果数据集不大）
+       
         self.images = {}
         self.masks = {}
         self.has_foreground = {}
 
-        print(f"预加载 {len(self.image_files)} 张图像...")
+        print(f"Preloading {len(self.image_files)} images...")
         for img_name in self.image_files:
             img_path = os.path.join(image_dir, img_name)
             if in_channels == 1:
@@ -649,7 +567,7 @@ class PatchDataset(Dataset):
                 img = np.array(Image.open(img_path).convert('RGB'), dtype=np.float32)
             self.images[img_name] = img
 
-            # 加载mask
+            
             base_name = os.path.splitext(img_name)[0]
             mask_path = None
             for ext in ['.png', '.jpg', '.bmp', '.tif']:
@@ -659,22 +577,22 @@ class PatchDataset(Dataset):
                     break
 
             if mask_path is None:
-                raise FileNotFoundError(f"找不到 {img_name} 对应的mask")
+                raise FileNotFoundError(f"Mask not found for {img_name}")
 
             mask = np.array(Image.open(mask_path).convert('L'), dtype=np.float32)
             mask = (mask > 127).astype(np.float32)
             self.masks[img_name] = mask
             self.has_foreground[img_name] = mask.max() > 0
 
-        print(f"PatchDataset: {len(self.image_files)} 张图像, "
-              f"每张裁剪 {patches_per_image} 个patch, "
-              f"共 {len(self.image_files) * patches_per_image} 个样本")
+        print(f"PatchDataset: {len(self.image_files)} images, "
+              f"{patches_per_image} patches per image, "
+              f"{len(self.image_files) * patches_per_image} samples in total")
 
     def __len__(self):
         return len(self.image_files) * self.patches_per_image
 
     def __getitem__(self, idx):
-        # 计算图片索引和patch索引
+        
         img_idx = idx // self.patches_per_image
         patch_idx = idx % self.patches_per_image
 
@@ -684,35 +602,35 @@ class PatchDataset(Dataset):
 
         H, W = image.shape[:2]
 
-        # 随机裁剪
+        
         if self.is_train and random.random() < self.ensure_foreground_ratio and self.has_foreground[img_name]:
-            # 保证裁剪到前景
+            
             foreground_coords = np.where(mask > 0)
             if len(foreground_coords[0]) > 0:
-                # 随机选择一个前景点
+                
                 rand_idx = random.randint(0, len(foreground_coords[0]) - 1)
                 cy, cx = foreground_coords[0][rand_idx], foreground_coords[1][rand_idx]
 
-                # 以该点为中心裁剪（确保不越界）
+                
                 y_start = max(0, min(cy - self.patch_size // 2, H - self.patch_size))
                 x_start = max(0, min(cx - self.patch_size // 2, W - self.patch_size))
             else:
-                # 完全随机
+                
                 y_start = random.randint(0, max(0, H - self.patch_size))
                 x_start = random.randint(0, max(0, W - self.patch_size))
         else:
-            # 完全随机裁剪
+            
             y_start = random.randint(0, max(0, H - self.patch_size))
             x_start = random.randint(0, max(0, W - self.patch_size))
 
-        # 裁剪
+        
         y_end = min(y_start + self.patch_size, H)
         x_end = min(x_start + self.patch_size, W)
 
         image_patch = image[y_start:y_end, x_start:x_end]
         mask_patch = mask[y_start:y_end, x_start:x_end]
 
-        # 如果裁剪区域小于patch_size，进行填充
+        
         if image_patch.shape[0] < self.patch_size or image_patch.shape[1] < self.patch_size:
             if self.in_channels == 1:
                 padded_image = np.zeros((self.patch_size, self.patch_size), dtype=np.float32)
@@ -728,22 +646,22 @@ class PatchDataset(Dataset):
             image_patch = padded_image
             mask_patch = padded_mask
 
-        # 数据增强（在归一化前进行，此时数据范围是 [0, 255]）
+        
         if self.is_train and self.augmentation is not None:
             image_patch, mask_patch = self.augmentation(image_patch, mask_patch)
 
-        # 归一化
+        
         if self.in_channels == 1:
             mean = image_patch.mean()
             std = image_patch.std()
             image_patch = (image_patch - mean) / (std + 1e-8)
-            image_patch = torch.from_numpy(image_patch).unsqueeze(0)  # [1, H, W]
+            image_patch = torch.from_numpy(image_patch).unsqueeze(0)  
         else:
             for c in range(3):
                 mean = image_patch[:, :, c].mean()
                 std = image_patch[:, :, c].std()
                 image_patch[:, :, c] = (image_patch[:, :, c] - mean) / (std + 1e-8)
-            image_patch = torch.from_numpy(image_patch).permute(2, 0, 1)  # [3, H, W]
+            image_patch = torch.from_numpy(image_patch).permute(2, 0, 1)  
 
         mask_patch = torch.from_numpy(mask_patch).unsqueeze(0)
 
@@ -753,30 +671,14 @@ class PatchDataset(Dataset):
 def sliding_window_inference(model, image, patch_size=256, stride=128,
                               blend_mode='average', device='cuda', use_flow=False,
                               verbose=False):
-    """
-    滑动窗口推理
-
-    Args:
-        model: 模型
-        image: [B, C, H, W] 输入图像
-        patch_size: patch大小
-        stride: 滑动步长
-        blend_mode: 重叠区域融合方式 ('average' 或 'max')
-        device: 计算设备
-        use_flow: 是否输出流场
-        verbose: 是否打印调试信息
-
-    Returns:
-        pred_mask: [B, 1, H, W] 预测mask
-        pred_flow: [B, 2, H, W] 预测流场 (如果use_flow=True)
-    """
+    
     model.eval()
     B, C, H, W = image.shape
 
     if verbose:
-        print(f"  [滑动窗口] 输入尺寸: {H}x{W}, patch: {patch_size}, stride: {stride}")
+        print(f"  [Sliding window] Input size: {H}x{W}, patch: {patch_size}, stride: {stride}")
 
-    # 初始化输出和计数图
+    
     output_seg = torch.zeros(B, 1, H, W, device=device)
     count = torch.zeros(B, 1, H, W, device=device)
 
@@ -785,7 +687,7 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
     else:
         output_flow = None
 
-    # 处理图像小于或等于patch_size的情况
+    
     if H <= patch_size and W <= patch_size:
         with torch.no_grad():
             outputs = model(image)
@@ -794,7 +696,7 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
                 return pred, outputs['flow']
             return pred, output_flow
 
-    # 计算滑动窗口位置
+    
     if H <= patch_size:
         y_positions = [0]
     else:
@@ -810,7 +712,7 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
             x_positions.append(W - patch_size)
 
     if verbose:
-        print(f"  [滑动窗口] y位置数: {len(y_positions)}, x位置数: {len(x_positions)}, 总patch数: {len(y_positions)*len(x_positions)}")
+        print(f"  [Sliding window] y positions: {len(y_positions)}, x positions: {len(x_positions)}, total patches: {len(y_positions)*len(x_positions)}")
 
     with torch.no_grad():
         for y in y_positions:
@@ -826,7 +728,7 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
                 if use_flow and 'flow' in outputs:
                     output_flow[:, :, y:y+patch_size, x:x+patch_size] += outputs['flow']
 
-    # 平均融合
+    
     count = count.clamp(min=1)
     output_seg = output_seg / count
 
@@ -836,13 +738,11 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
     return output_seg, output_flow
 
 
-# ===================== 训练函数 =====================
+
 
 def train_one_epoch(model, dataloader, criterion, optimizer, scaler, device, epoch, total_epochs,
                     max_grad_norm=1.0, use_flow_loss=True):
-    """
-    单 batch 训练（原始尺寸）
-    """
+    
     model.train()
     total_loss = 0
     total_seg_loss = 0
@@ -857,7 +757,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, scaler, device, epo
         images = images.to(device)
         masks = masks.to(device)
 
-        # 计算梯度流GT
+        
         if use_flow_loss:
             flow_gt = compute_flow_gt_batch(masks, device)
         else:
@@ -868,11 +768,11 @@ def train_one_epoch(model, dataloader, criterion, optimizer, scaler, device, epo
         with autocast():
             outputs = model(images)
 
-            # 深度监督
+            
             if 'seg_ds' in outputs:
                 loss, seg_loss, flow_loss_val = criterion(outputs, masks, flow_gt)
 
-                # 辅助输出损失
+                
                 outputs_ds = {'seg': outputs['seg_ds']}
                 if 'flow_ds' in outputs:
                     outputs_ds['flow'] = outputs['flow_ds']
@@ -892,7 +792,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, scaler, device, epo
                 loss, seg_loss, flow_loss_val = criterion(outputs, masks, flow_gt)
 
         if torch.isnan(loss) or torch.isinf(loss):
-            print(f"  警告: Batch {batch_idx} 出现 NaN/Inf loss，跳过")
+            print(f"  Warning: Batch {batch_idx} has NaN/Inf loss, skipping")
             continue
 
         scaler.scale(loss).backward()
@@ -923,14 +823,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, scaler, device, epo
 
 def validate(model, dataloader, criterion, device, epoch, total_epochs, use_flow_loss=True,
              use_sliding_window=False, patch_size=256, stride=128):
-    """
-    验证函数
-
-    Args:
-        use_sliding_window: 是否使用滑动窗口推理
-        patch_size: patch大小（滑动窗口模式）
-        stride: 滑动步长（滑动窗口模式）
-    """
+   
     model.eval()
     total_loss = 0
     total_seg_loss = 0
@@ -948,26 +841,25 @@ def validate(model, dataloader, criterion, device, epoch, total_epochs, use_flow
             masks = masks.to(device)
 
             if use_sliding_window:
-                # 滑动窗口推理（返回的是sigmoid后的概率）
-                # 第一个batch打印调试信息
+               
                 verbose = (batch_idx == 0 and epoch == 0)
                 pred_seg, pred_flow = sliding_window_inference(
                     model, images, patch_size=patch_size, stride=stride,
                     device=device, use_flow=use_flow_loss, verbose=verbose
                 )
-                # 对于损失计算，需要转换回logits
+                
                 pred_seg_logits = torch.log(pred_seg / (1 - pred_seg + 1e-8) + 1e-8)
                 outputs = {'seg': pred_seg_logits}
                 if pred_flow is not None:
                     outputs['flow'] = pred_flow
-                # 用于指标计算的预测（已经是sigmoid后的概率）
+                
                 preds = pred_seg
                 is_sigmoid = True
             else:
-                # 普通推理
+                
                 outputs = model(images)
                 preds = torch.sigmoid(outputs['seg'])
-                is_sigmoid = True  # preds已经是sigmoid后的概率，标记为True
+                is_sigmoid = True  
 
             if use_flow_loss:
                 flow_gt = compute_flow_gt_batch(masks, device)
@@ -998,31 +890,19 @@ def validate(model, dataloader, criterion, device, epoch, total_epochs, use_flow
             total_flow_loss / valid_batches, total_dice / valid_batches, total_iou / valid_batches)
 
 
-# ===================== 训练曲线绘制 =====================
 
 def plot_training_curves(history: dict, save_path: str):
-    """
-    绘制训练曲线并保存为 PNG
-
-    包含三张独立图 + 一张 1x3 总览图:
-    1. 训练与验证损失曲线   (_loss.png)
-    2. 验证集分割性能收敛曲线 (_convergence.png)
-    3. 学习率调度曲线        (_lr.png)
-
-    Args:
-        history: 训练历史记录字典 {'epoch': [], 'train_loss': [], ...}
-        save_path: 组合总览图保存路径
-    """
+   
     epochs = history['epoch']
     if len(epochs) < 1:
-        print("无训练历史，跳过曲线绘制")
+        print("No training history, skipping curve plotting")
         return
 
     base_dir = os.path.dirname(save_path)
     os.makedirs(base_dir, exist_ok=True)
     base_name = os.path.splitext(os.path.basename(save_path))[0]
 
-    # ---------- 1. 训练与验证损失曲线 ----------
+
     def _plot_loss(ax):
         ax.plot(epochs, history['train_loss'], 'b-', label='Train Loss', linewidth=2)
         if history['val_loss']:
@@ -1033,22 +913,22 @@ def plot_training_curves(history: dict, save_path: str):
         ax.legend(loc='best', framealpha=1.0, handlelength=2, labelspacing=0.5)
         ax.grid(True, alpha=0.3)
 
-    # ---------- 2. 验证集分割性能收敛曲线 ----------
+
     def _plot_convergence(ax):
         val_dice_list = history['val_dice'] if history['val_dice'] else []
         if not val_dice_list:
             ax.set_title('Val Dice Convergence (no data)')
             return
-        # 原始验证集 Dice
+
         ax.plot(epochs, val_dice_list, 'b-', label='Val Dice', linewidth=1.5, alpha=0.6)
-        # 最佳 Val Dice 单调收敛轨迹
+
         best_so_far = []
         best_val = float('-inf')
         for d in val_dice_list:
             best_val = max(best_val, d)
             best_so_far.append(best_val)
         ax.plot(epochs, best_so_far, 'g-', label='Best Val Dice (convergence)', linewidth=2.5)
-        # 标注最佳点
+
         final_best = max(best_so_far)
         final_idx = best_so_far.index(final_best)
         ax.annotate(f'Best: {final_best:.4f}\nEpoch {epochs[final_idx]+1}',
@@ -1064,7 +944,7 @@ def plot_training_curves(history: dict, save_path: str):
         ax.grid(True, alpha=0.3)
         ax.set_ylim(bottom=0)
 
-    # ---------- 3. 学习率调度曲线 ----------
+
     def _plot_lr(ax):
         lr_list = history.get('lr', [])
         if lr_list:
@@ -1076,7 +956,7 @@ def plot_training_curves(history: dict, save_path: str):
         ax.grid(True, alpha=0.3)
         ax.set_yscale('log')
 
-    # ===== 组合总览图 (1x3) =====
+
     fig, axes = plt.subplots(1, 3, figsize=(20, 5.5))
     _plot_loss(axes[0])
     _plot_convergence(axes[1])
@@ -1085,83 +965,82 @@ def plot_training_curves(history: dict, save_path: str):
     fig.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
 
-    # ===== 独立图 =====
-    # 1. 训练与验证损失曲线
+ 
     fig, ax = plt.subplots(figsize=(7.5, 5))
     _plot_loss(ax)
     plt.tight_layout()
     fig.savefig(os.path.join(base_dir, f'{base_name}_loss.png'), dpi=150, bbox_inches='tight')
     plt.close(fig)
 
-    # 2. 验证集分割性能收敛曲线
+
     fig, ax = plt.subplots(figsize=(7.5, 5))
     _plot_convergence(ax)
     plt.tight_layout()
     fig.savefig(os.path.join(base_dir, f'{base_name}_convergence.png'), dpi=150, bbox_inches='tight')
     plt.close(fig)
 
-    # 3. 学习率调度曲线
+
     fig, ax = plt.subplots(figsize=(7.5, 5))
     _plot_lr(ax)
     plt.tight_layout()
     fig.savefig(os.path.join(base_dir, f'{base_name}_lr.png'), dpi=150, bbox_inches='tight')
     plt.close(fig)
 
-    print(f"训练曲线已保存到:")
-    print(f"  - 总览图:      {save_path}")
-    print(f"  - 损失曲线:    {os.path.join(base_dir, f'{base_name}_loss.png')}")
-    print(f"  - 收敛曲线:    {os.path.join(base_dir, f'{base_name}_convergence.png')}")
-    print(f"  - LR调度曲线:  {os.path.join(base_dir, f'{base_name}_lr.png')}")
+    print(f"Training curves saved to:")
+    print(f"  - Overview:      {save_path}")
+    print(f"  - Loss curve:    {os.path.join(base_dir, f'{base_name}_loss.png')}")
+    print(f"  - Convergence:   {os.path.join(base_dir, f'{base_name}_convergence.png')}")
+    print(f"  - LR schedule:   {os.path.join(base_dir, f'{base_name}_lr.png')}")
 
 
-# ===================== 配置参数 =====================
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='SGWDSNet Training')
 
-    # 数据路径
+   
     parser.add_argument('--image_dir', type=str, default=r'E:\picture\trainval-image',
-                        help='训练图像目录')
+                        help='training image directory')
     parser.add_argument('--mask_dir', type=str, default=r'E:\picture\trainval-mask',
-                        help='训练标签目录')
+                        help='training mask directory')
     parser.add_argument('--val_image_dir', type=str, default=None,
-                        help='验证集图像目录')
+                        help='validation image directory')
     parser.add_argument('--val_mask_dir', type=str, default=None,
-                        help='验证集标签目录')
+                        help='validation mask directory')
     parser.add_argument('--output_dir', type=str, default='./checkpoints_cellpose',
-                        help='模型保存目录')
+                        help='checkpoint output directory')
 
-    # 模型参数
-    parser.add_argument('--in_channels', type=int, default=1, help='输入通道数')
-    parser.add_argument('--n_channels', type=int, default=32, help='基础通道数')
-    parser.add_argument('--n_classes', type=int, default=1, help='输出类别数')
-    parser.add_argument('--img_size', type=int, default=256, help='输入图像尺寸')
 
-    # Cellpose参数
+    parser.add_argument('--in_channels', type=int, default=1, help='input channels')
+    parser.add_argument('--n_channels', type=int, default=32, help='base channels')
+    parser.add_argument('--n_classes', type=int, default=1, help='number of classes')
+    parser.add_argument('--img_size', type=int, default=256, help='input image size')
+
+
     parser.add_argument('--predict_flow', type=lambda x: x.lower() in ('true', '1', 'yes'),
-                        default=True, help='是否预测梯度流场')
+                        default=True, help='predict gradient flow')
     parser.add_argument('--predict_cell_prob', type=lambda x: x.lower() in ('true', '1', 'yes'),
-                        default=False, help='是否预测细胞概率')
+                        default=False, help='predict cell probability')
     parser.add_argument('--flow_weight', type=float, default=0.5,
-                        help='梯度流损失权重')
+                        help='flow loss weight')
     parser.add_argument('--seg_weight', type=float, default=0.5,
-                        help='分割损失权重')
+                        help='segmentation loss weight')
 
-    # 训练参数
-    parser.add_argument('--batch_size', type=int, default=4, help='批次大小')
-    parser.add_argument('--epochs', type=int, default=300, help='训练轮数')
-    parser.add_argument('--lr', type=float, default=3e-4, help='学习率')
-    parser.add_argument('--weight_decay', type=float, default=5e-4, help='权重衰减')
-    parser.add_argument('--num_workers', type=int, default=4, help='数据加载线程数')
 
-    # 学习率调度
+    parser.add_argument('--batch_size', type=int, default=4, help='batch size')
+    parser.add_argument('--epochs', type=int, default=300, help='training epochs')
+    parser.add_argument('--lr', type=float, default=3e-4, help='learning rate')
+    parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay')
+    parser.add_argument('--num_workers', type=int, default=4, help='dataloader workers')
+
+
     parser.add_argument('--scheduler', type=str, default='poly',
                         choices=['cosine', 'step', 'plateau', 'poly'])
     parser.add_argument('--min_lr', type=float, default=1e-6)
     parser.add_argument('--warmup_epochs', type=int, default=20)
     parser.add_argument('--poly_exponent', type=float, default=0.9)
 
-    # 其他
+  
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--resume', type=str, default=None)
@@ -1169,26 +1048,26 @@ def parse_args():
     parser.add_argument('--deep_supervision', action='store_true', default=False)
     parser.add_argument('--dropout_rate', type=float, default=0.2)
     parser.add_argument('--use_l2_pool', type=lambda x: x.lower() in ('true', '1', 'yes'), default=True,
-                        help='是否在 MSAS 中使用 L2 池化（True/False）')
+                        help='use L2 pooling in MSAS (True/False)')
     parser.add_argument('--oversample_foreground', action='store_true', default=True)
     parser.add_argument('--oversample_foreground_percent', type=float, default=0.33)
 
-    # Patch训练参数（随机裁剪）
+   
     parser.add_argument('--use_patch_training', action='store_true', default=False,
-                        help='是否使用patch训练模式（随机裁剪）')
+                        help='use patch training (random crop)')
     parser.add_argument('--patch_size', type=int, default=256,
-                        help='patch大小（用于patch训练和滑动窗口推理）')
+                        help='patch size for patch training and sliding window inference')
     parser.add_argument('--patches_per_image', type=int, default=10,
-                        help='每张图裁剪的patch数量')
+                        help='number of patches cropped per image')
     parser.add_argument('--ensure_foreground_ratio', type=float, default=0.7,
-                        help='保证裁剪到前景的概率（0-1）')
+                        help='probability of cropping a foreground patch (0-1)')
     parser.add_argument('--stride', type=int, default=128,
-                        help='滑动窗口步长（用于验证时的滑动窗口推理）')
+                        help='sliding window stride for validation inference')
 
     return parser.parse_args()
 
 
-# ===================== 主函数 =====================
+
 
 def main():
     args = parse_args()
@@ -1198,10 +1077,10 @@ def main():
 
     if args.gpu >= 0 and torch.cuda.is_available():
         device = torch.device(f'cuda:{args.gpu}')
-        print(f"使用 GPU: {args.gpu}")
+        print(f"Using GPU: {args.gpu}")
     else:
         device = torch.device('cpu')
-        print("使用 CPU")
+        print("Using CPU")
 
     os.makedirs(args.output_dir, exist_ok=True)
     log_dir = os.path.join(args.output_dir, 'logs')
@@ -1229,11 +1108,11 @@ def main():
         double_aug_prob=0.3
     )
 
-    print("加载数据集...")
+    print("Loading dataset...")
 
-    # 根据是否使用patch训练选择不同的数据集类
+
     if args.use_patch_training:
-        print(f"使用Patch训练模式: patch_size={args.patch_size}, "
+        print(f"Using Patch training mode: patch_size={args.patch_size}, "
               f"patches_per_image={args.patches_per_image}, "
               f"ensure_foreground_ratio={args.ensure_foreground_ratio}")
         train_dataset = PatchDataset(
@@ -1254,33 +1133,33 @@ def main():
         train_dataset = ForegroundOversampleDataset(train_dataset, args.oversample_foreground_percent)
 
     if args.val_image_dir and args.val_mask_dir:
-        print("使用独立验证集...")
+        print("Using independent validation set...")
         if args.use_patch_training:
-            # Patch训练模式下，验证集使用原图（滑动窗口推理）
-            val_dataset = TN3KDataset(args.val_image_dir, args.val_mask_dir, img_size=0,  # 不resize
+           
+            val_dataset = TN3KDataset(args.val_image_dir, args.val_mask_dir, img_size=0,
                                       is_train=False, augmentation=None,
                                       in_channels=args.in_channels)
         else:
             val_dataset = TN3KDataset(args.val_image_dir, args.val_mask_dir, img_size=args.img_size,
                                       is_train=False, augmentation=None,
                                       in_channels=args.in_channels)
-        print(f"训练集: {len(train_dataset)} 样本, 验证集: {len(val_dataset)} 张")
+        print(f"Train set: {len(train_dataset)} samples, validation set: {len(val_dataset)} images")
     else:
         val_size = int(len(train_dataset) * args.val_ratio)
         train_size = len(train_dataset) - val_size
         train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size],
                                                    generator=torch.Generator().manual_seed(args.seed))
-        print(f"训练集: {len(train_dataset)} 张, 验证集: {len(val_dataset)} 张")
+        print(f"Train set: {len(train_dataset)} images, validation set: {len(val_dataset)} images")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                               shuffle=True, num_workers=args.num_workers, pin_memory=True)
 
-    # 验证集batch_size：Patch训练模式下使用1（因为是大图+滑动窗口推理）
+
     val_batch_size = 1 if args.use_patch_training else args.batch_size
     val_loader = DataLoader(val_dataset, batch_size=val_batch_size,
                             shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
-    print("创建模型...")
+    print("Creating model...")
     model = SGWDSNet(
         in_channels=args.in_channels,
         n_channels=args.n_channels,
@@ -1291,30 +1170,6 @@ def main():
         dropout_rate=args.dropout_rate,
         use_l2_pool=args.use_l2_pool
     ).to(device)
-
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"模型参数量: {total_params / 1e6:.2f}M")
-
-    # 计算 FLOPs（hook 统计 Conv2d + Linear，不依赖 fvcore）
-    total_flops = 0
-    def _flop_hook(module, inp, out):
-        nonlocal total_flops
-        if isinstance(module, nn.Conv2d):
-            Cout = module.out_channels
-            Cin_per_group = module.in_channels // module.groups
-            Kh, Kw = module.kernel_size
-            Ho, Wo = out.shape[2], out.shape[3]
-            # MACs = Cout * Ho * Wo * (Cin/groups * Kh * Kw)
-            total_flops += Cout * Ho * Wo * Cin_per_group * Kh * Kw
-        elif isinstance(module, nn.Linear):
-            total_flops += module.in_features * module.out_features
-
-    hooks = [m.register_forward_hook(_flop_hook) for m in model.modules()]
-    with torch.no_grad():
-        model(torch.randn(1, args.in_channels, args.img_size, args.img_size).to(device))
-    for h in hooks:
-        h.remove()
-    print(f"计算复杂度: {total_flops / 1e9:.2f}G FLOPs")
 
     criterion = CellposeLoss(
         seg_weight=args.seg_weight,
@@ -1340,7 +1195,7 @@ def main():
     start_epoch = 0
     best_dice = 0
 
-    # 训练历史记录（用于绘制曲线）
+
     history = {
         'epoch': [],
         'train_loss': [],
@@ -1356,39 +1211,38 @@ def main():
     }
 
     if args.resume:
-        print(f"从 {args.resume} 恢复训练...")
+        print(f"Resuming training from {args.resume}...")
         checkpoint = torch.load(args.resume, map_location=device)
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         best_dice = checkpoint.get('best_dice', 0)
-        # 恢复训练历史（用于继续绘制曲线）
+        
         if 'history' in checkpoint and checkpoint['history']:
             history = checkpoint['history']
-            print(f"已恢复训练历史: {len(history['epoch'])} 个 epoch")
+            print(f"Restored training history: {len(history['epoch'])} epochs")
 
-    print("\n" + "=" * 60)
-    print("SGWDSNet 训练配置:")
+    print("SGWDSNet training configuration:")
     print("=" * 60)
-    print(f"  输入通道数: {args.in_channels} ({'灰度' if args.in_channels == 1 else 'RGB'})")
-    print(f"  学习率: {args.lr}")
-    print(f"  批次大小: {args.batch_size}")
-    print(f"  训练轮数: {args.epochs}")
-    print(f"  预测梯度流: {args.predict_flow}")
-    print(f"  梯度流损失权重: {args.flow_weight}")
-    print(f"  分割损失权重: {args.seg_weight}")
-    print(f"  深度监督: {args.deep_supervision}")
-    print(f"  模块: MSAS + SC2A + SGWDS + GASG")
-    print(f"  L2池化: {args.use_l2_pool}")
-    print(f"  Patch训练模式: {args.use_patch_training}")
+    print(f"  Input channels: {args.in_channels} ({'grayscale' if args.in_channels == 1 else 'RGB'})")
+    print(f"  Learning rate: {args.lr}")
+    print(f"  Batch size: {args.batch_size}")
+    print(f"  Training epochs: {args.epochs}")
+    print(f"  Predict gradient flow: {args.predict_flow}")
+    print(f"  Flow loss weight: {args.flow_weight}")
+    print(f"  Segmentation loss weight: {args.seg_weight}")
+    print(f"  Deep supervision: {args.deep_supervision}")
+    print(f"  Modules: MSAS + SC2A + SGWDS + GASG")
+    print(f"  L2 pooling: {args.use_l2_pool}")
+    print(f"  Patch training mode: {args.use_patch_training}")
     if args.use_patch_training:
-        print(f"  Patch大小: {args.patch_size}")
-        print(f"  每张图Patch数: {args.patches_per_image}")
-        print(f"  保证前景概率: {args.ensure_foreground_ratio}")
-        print(f"  滑动窗口步长: {args.stride}")
+        print(f"  Patch size: {args.patch_size}")
+        print(f"  Patches per image: {args.patches_per_image}")
+        print(f"  Ensure foreground ratio: {args.ensure_foreground_ratio}")
+        print(f"  Sliding window stride: {args.stride}")
     print("=" * 60 + "\n")
 
-    print("开始训练...")
+    print("Starting training...")
     for epoch in range(start_epoch, args.epochs):
         train_loss, train_seg_loss, train_flow_loss, train_dice = train_one_epoch(
             model, train_loader, criterion, optimizer, scaler, device, epoch, args.epochs,
@@ -1398,7 +1252,7 @@ def main():
         val_loss, val_seg_loss, val_flow_loss, val_dice, val_iou = validate(
             model, val_loader, criterion, device, epoch, args.epochs,
             use_flow_loss=args.predict_flow,
-            use_sliding_window=args.use_patch_training,  # Patch训练时使用滑动窗口验证
+            use_sliding_window=args.use_patch_training,  
             patch_size=args.patch_size,
             stride=args.stride
         )
@@ -1419,7 +1273,7 @@ def main():
               f"Val Loss: {val_loss:.4f}, Dice: {val_dice:.4f}, IoU: {val_iou:.4f} | "
               f"LR: {current_lr:.6f}")
 
-        # 记录训练历史（用于绘制曲线）
+
         history['epoch'].append(epoch)
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
@@ -1432,7 +1286,7 @@ def main():
         history['val_iou'].append(val_iou)
         history['lr'].append(current_lr)
 
-        # 训练结束后统一绘制曲线
+
         if (epoch + 1) == args.epochs:
             curves_path = os.path.join(args.output_dir, 'training_curves.png')
             plot_training_curves(history, curves_path)
@@ -1457,7 +1311,7 @@ def main():
                 'val_iou': val_iou,
                 'history': history,
             }, save_path)
-            print(f"保存最佳模型: Dice={best_dice:.4f}")
+            print(f"Saved best model: Dice={best_dice:.4f}")
 
         if (epoch + 1) % 20 == 0:
             save_path = os.path.join(args.output_dir, f'checkpoint_epoch{epoch+1}.pth')
@@ -1469,7 +1323,7 @@ def main():
             }, save_path)
 
     writer.close()
-    print(f"\n训练完成！最佳 Dice: {best_dice:.4f}")
+    print(f"\nTraining finished. Best Dice: {best_dice:.4f}")
 
 
 if __name__ == '__main__':

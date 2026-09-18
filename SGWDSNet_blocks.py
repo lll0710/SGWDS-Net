@@ -7,10 +7,9 @@ import torch.nn.functional as F
 import math
 
 
-# ===================== 基础工具 (保持不变) =====================
 
 def get_norm_layer(norm_type, num_channels, num_groups=8):
-    """归一化层工厂函数"""
+    
     if norm_type == 'group':
         return nn.GroupNorm(num_groups, num_channels)
     elif norm_type == 'instance':
@@ -45,7 +44,7 @@ class LayerNorm(nn.Module):
 
 
 class OutBlock(nn.Module):
-    """输出模块"""
+    
     def __init__(self, in_channels, n_classes):
         super().__init__()
         self.conv_out = nn.ConvTranspose2d(in_channels, n_classes, kernel_size=1)
@@ -54,10 +53,10 @@ class OutBlock(nn.Module):
         return self.conv_out(x)
 
 
-# ===================== MedNeXt 基础模块 (保持不变) =====================
+
 
 class MedNeXtBlock(nn.Module):
-    """MedNeXt 基础块"""
+    
 
     def __init__(self,
                  in_channels: int,
@@ -132,7 +131,7 @@ class MedNeXtBlock(nn.Module):
 
 
 class Down(MedNeXtBlock):
-    """下采样模块（原 MedNeXtDownBlock）"""
+    
 
     def __init__(self, in_channels, out_channels, exp_r=4, kernel_size=7,
                 do_res=False, norm_type='group', grn=False):
@@ -166,10 +165,10 @@ class Down(MedNeXtBlock):
         return x1
 
 
-# ===================== 注意力模块 (保持不变) =====================
+
 
 class SampleAdaptiveSASA(nn.Module):
-    """样本自适应多语义空间注意力（Sample-Adaptive Semantic-Aware Spatial Attention）- 纯2D版本"""
+    
 
     def __init__(self, channels, gamma=2, b=1, num_scales=4):
         super().__init__()
@@ -274,7 +273,7 @@ class SampleAdaptiveSASA(nn.Module):
 
 
 class PSVCA(nn.Module):
-    """渐进式空间-视觉通道注意力模块 - 纯2D版本"""
+    
 
     def __init__(self, channels, reduction=16):
         super().__init__()
@@ -305,7 +304,7 @@ class PSVCA(nn.Module):
 
 
 class SC2A(nn.Module):
-    """空间与通道交叉注意力（Spatial-Channel Cross Attention）- 纯2D版本"""
+    """Spatial-Channel Cross Attention (2D)"""
 
     def __init__(self, channels, gamma=2, b=1, reduction_ratio=16):
         super().__init__()
@@ -319,13 +318,7 @@ class SC2A(nn.Module):
 
 
 class TriplePoolAttention(nn.Module):
-    """三重池化注意力模块：AVP + MAP + L2P → SC2A
-
-    Args:
-        channels: 输入通道数
-        reduction_ratio: 压缩比
-        use_l2_pool: 是否使用 L2 池化（False 时仅使用 AVG + MAX）
-    """
+   
 
     def __init__(self, channels: int, reduction_ratio: int = 16, use_l2_pool: bool = True):
         super().__init__()
@@ -371,10 +364,10 @@ class TriplePoolAttention(nn.Module):
         return branch_weights, sc2a_enhanced
 
 
-# ===================== 上采样模块 (保持不变) =====================
+
 
 class SGWDSBlock(nn.Module):
-    """语义引导加权动态采样模块（Semantic-Guided Weighted Dynamic Sampling）- 纯2D版本"""
+    
 
     def __init__(self, in_channels: int, out_channels: int, scale_factor: int = 2,
                  norm_type: str = 'group',
@@ -508,29 +501,9 @@ class SGWDSBlock(nn.Module):
         return sampled_weighted
 
 
-# ===================== 自适应跳跃连接门控 =====================
 
 class GroupAdaptiveSkipGate(nn.Module):
-    """
-    多组协同的自适应跳跃连接门控
 
-    设计目的：
-    - SGWDS上采样特征已经是优化后的，不应被跳跃连接破坏
-    - 让网络自适应决定跳跃连接的"用量"
-    - 无上限限制：Sigmoid 输出自然在 [0, 1]，让网络自由学习
-
-    工作流程：
-    1. 瓶颈层特征 + 上采样特征 → 全局池化
-    2. 分成4组，每组输入到一个子模块
-    3. 每个子模块独立评估"需要多少跳跃连接"
-    4. 平均所有评估 → 最终比例 ∈ [0, 1]
-    5. 输出 = 上采样 + 比例 × 跳跃连接
-
-    Args:
-        channels: 上采样特征通道数
-        groups: 分组数量，默认4
-        bottleneck_channels: 瓶颈层通道数，默认为 channels * 2
-    """
 
     def __init__(self, channels: int, groups: int = 4, bottleneck_channels: int = None):
         super().__init__()
@@ -539,13 +512,10 @@ class GroupAdaptiveSkipGate(nn.Module):
         if bottleneck_channels is None:
             bottleneck_channels = channels * 2
 
-        # 每组的特征大小（双重池化后维度翻倍）
         up_group_size = channels // groups
         bn_group_size = bottleneck_channels // groups
 
-        # 多个子模块：每组一个
-        # 输入：瓶颈层分组(avg+max) + 上采样分组(avg+max)
-        # 输出：该组的比例建议 ∈ [0, 1]
+        
         self.sub_modules = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(bn_group_size * 2 + up_group_size * 2, 1),
@@ -554,65 +524,53 @@ class GroupAdaptiveSkipGate(nn.Module):
         ])
 
     def forward(self, upsampled, skip, bottleneck_feat):
-        """
-        Args:
-            upsampled: [B, C, H, W] SGWDS上采样输出
-            skip: [B, C, H, W] 跳跃连接特征
-            bottleneck_feat: [B, C_bn, H', W'] 瓶颈层特征
-
-        Returns:
-            output: [B, C, H, W] 融合后的特征
-        """
+        
         B, C, H, W = upsampled.shape
 
-        # Step 1: 全局信息提取（双重池化：Avg + Max）
-        # MaxPool 保留目标区域信号，对稀疏小目标至关重要
+        
         bn_avg = F.adaptive_avg_pool2d(bottleneck_feat, 1).view(B, -1)
         bn_max = F.adaptive_max_pool2d(bottleneck_feat, 1).view(B, -1)
-        bn_global = torch.cat([bn_avg, bn_max], dim=1)  # [B, C_bn*2]
+        bn_global = torch.cat([bn_avg, bn_max], dim=1)  
 
         up_avg = F.adaptive_avg_pool2d(upsampled, 1).view(B, -1)
         up_max = F.adaptive_max_pool2d(upsampled, 1).view(B, -1)
-        up_global = torch.cat([up_avg, up_max], dim=1)  # [B, C*2]
+        up_global = torch.cat([up_avg, up_max], dim=1)  
 
-        # Step 2: 分组大小（原始通道数，不含池化扩展）
+        
         bn_group_size = bottleneck_feat.shape[1] // self.groups
         up_group_size = C // self.groups
 
-        # Step 3: 各子模块独立评估
+        
         proposals = []
         for g in range(self.groups):
-            # 取该组的特征：从 avg 和 max 各取对应通道
-            # bn_global: [avg_channels, max_channels] 各 C_bn 个
-            # up_global: [avg_channels, max_channels] 各 C 个
-            bn_avg_g = bn_global[:, g*bn_group_size:(g+1)*bn_group_size]  # avg 部分
-            bn_max_g = bn_global[:, bottleneck_feat.shape[1] + g*bn_group_size:bottleneck_feat.shape[1] + (g+1)*bn_group_size]  # max 部分
-            up_avg_g = up_global[:, g*up_group_size:(g+1)*up_group_size]  # avg 部分
-            up_max_g = up_global[:, C + g*up_group_size:C + (g+1)*up_group_size]  # max 部分
+            
+            bn_avg_g = bn_global[:, g*bn_group_size:(g+1)*bn_group_size]  
+            bn_max_g = bn_global[:, bottleneck_feat.shape[1] + g*bn_group_size:bottleneck_feat.shape[1] + (g+1)*bn_group_size]  
+            up_avg_g = up_global[:, g*up_group_size:(g+1)*up_group_size]  
+            up_max_g = up_global[:, C + g*up_group_size:C + (g+1)*up_group_size]  
 
-            # 拼接 → 子模块 → 比例建议
+            
             input_g = torch.cat([bn_avg_g, bn_max_g, up_avg_g, up_max_g], dim=1)
-            proposal_g = self.sub_modules[g](input_g)  # [B, 1] ∈ [0, 1]
+            proposal_g = self.sub_modules[g](input_g)  
             proposals.append(proposal_g)
 
-        # Step 4: 综合所有建议（平均）
-        proposals = torch.cat(proposals, dim=1)  # [B, groups]
-        final_ratio = proposals.mean(dim=1)      # [B] ∈ [0, 1]
+        
+        proposals = torch.cat(proposals, dim=1)  
+        final_ratio = proposals.mean(dim=1)      
 
-        # Step 5: 尺寸匹配
+        
         if skip.shape[2:] != upsampled.shape[2:]:
             skip = F.interpolate(skip, size=(H, W), mode='bilinear', align_corners=True)
 
-        # Step 7: 融合（上采样 + 比例 × 跳跃连接）
+        
         output = upsampled + final_ratio.view(B, 1, 1, 1) * skip
 
         return output
 
 
-# ===================== 卷积模块 (保持不变) =====================
 
 class MSASLayer(nn.Module):
-    """MSAS核心层：多分支深度可分离卷积 + 三重池化注意力 + 内部残差连接 - 纯2D版本"""
+    
 
     def __init__(self, channels: int, norm_type: str = 'group',
                  reduction_ratio: int = 16, use_l2_pool: bool = True):
@@ -675,7 +633,7 @@ class MSASLayer(nn.Module):
 
 
 class MSASBlock(nn.Module):
-    """多尺度自适应分离卷积模块 - 纯2D版本"""
+    
 
     def __init__(self, in_channels: int, out_channels: int,
                  norm_type: str = 'group',
@@ -727,26 +685,16 @@ class MSASBlock(nn.Module):
         return x
 
 
-# ===================== 新增: 梯度流预测头 (Cellpose核心) =====================
+
 
 class GradientFlowHead(nn.Module):
-    """
-    Cellpose核心: 梯度流场预测头
-
-    输出3通道:
-    - dy: Y方向梯度 (指向边界)
-    - dx: X方向梯度 (指向边界)
-    - cell_prob: 细胞概率 (可选)
-
-    这使得网络学习预测每个像素指向最近边界的梯度向量，
-    然后可以通过后续的扩散/聚类算法恢复实例分割
-    """
+   
 
     def __init__(self, in_channels: int, hidden_channels: int = 64,
                  norm_type: str = 'group', predict_prob: bool = False):
         super().__init__()
         self.predict_prob = predict_prob
-        out_channels = 3 if predict_prob else 2  # 2(dy,dx) + 1(prob)
+        out_channels = 3 if predict_prob else 2  
 
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, hidden_channels, 3, padding=1),
@@ -765,8 +713,8 @@ class GradientFlowHead(nn.Module):
         x = self.conv2(x)
         out = self.output(x)
 
-        # 梯度流归一化 (使网络学习方向而非幅度)
-        flow = out[:, :2, :, :]  # [B, 2, H, W]
+        
+        flow = out[:, :2, :, :]  
         flow_norm = torch.sqrt(flow[:, 0:1]**2 + flow[:, 1:2]**2 + 1e-8)
         flow_normalized = flow / flow_norm
 
@@ -777,7 +725,7 @@ class GradientFlowHead(nn.Module):
             return flow_normalized
 
 
-# ===================== 导出 =====================
+
 
 __all__ = [
     'get_norm_layer', 'LayerNorm', 'OutBlock',

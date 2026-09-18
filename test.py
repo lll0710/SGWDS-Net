@@ -1,11 +1,3 @@
-# -----------------------------------------------------------
-# test.py - SGWDSNet 测试脚本
-# 功能：
-# 1. 加载训练好的模型
-# 2. 批量测试 2D 医学图像数据集
-# 3. 评估指标 (分割 + 梯度流场)
-# 4. 文本结果导出
-# -----------------------------------------------------------
 import os
 import argparse
 import numpy as np
@@ -20,30 +12,15 @@ from tqdm import tqdm
 from SGWDSNet import SGWDSNet, compute_gradient_flow_from_mask
 
 
-# ===================== 滑动窗口推理 =====================
+
 
 def sliding_window_inference(model, image, patch_size=256, stride=128,
                               blend_mode='average', device='cuda', use_flow=False):
-    """
-    滑动窗口推理
-
-    Args:
-        model: 模型
-        image: [B, C, H, W] 输入图像
-        patch_size: patch大小
-        stride: 滑动步长
-        blend_mode: 重叠区域融合方式 ('average' 或 'max')
-        device: 计算设备
-        use_flow: 是否输出流场
-
-    Returns:
-        pred_mask: [B, 1, H, W] 预测mask
-        pred_flow: [B, 2, H, W] 预测流场 (如果use_flow=True)
-    """
+    
     model.eval()
     B, C, H, W = image.shape
 
-    # 初始化输出和计数图
+   
     output_seg = torch.zeros(B, 1, H, W, device=device)
     count = torch.zeros(B, 1, H, W, device=device)
 
@@ -52,7 +29,7 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
     else:
         output_flow = None
 
-    # 处理图像小于patch_size的情况
+  
     if H < patch_size or W < patch_size:
         with torch.no_grad():
             outputs = model(image)
@@ -61,11 +38,11 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
                 return pred, outputs['flow']
             return pred, output_flow
 
-    # 滑动窗口
+  
     y_positions = list(range(0, H - patch_size + 1, stride))
     x_positions = list(range(0, W - patch_size + 1, stride))
 
-    # 确保覆盖到边缘
+    
     if y_positions[-1] + patch_size < H:
         y_positions.append(H - patch_size)
     if x_positions[-1] + patch_size < W:
@@ -85,7 +62,7 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
                 if use_flow and 'flow' in outputs:
                     output_flow[:, :, y:y+patch_size, x:x+patch_size] += outputs['flow']
 
-    # 平均融合
+   
     count = count.clamp(min=1)
     output_seg = output_seg / count
 
@@ -95,63 +72,63 @@ def sliding_window_inference(model, image, patch_size=256, stride=128,
     return output_seg, output_flow
 
 
-# ===================== 配置参数 =====================
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='SGWDSNet Testing')
 
     parser.add_argument('--image_dir', type=str, default=r'E:\picture\trainval-image',
-                        help='测试图像目录')
+                        help='test image directory')
     parser.add_argument('--mask_dir', type=str, default=r'E:\picture\trainval-mask',
-                        help='测试标签目录')
+                        help='test mask directory')
     parser.add_argument('--output_dir', type=str, default='./results',
-                        help='结果保存目录')
+                        help='output directory')
 
     parser.add_argument('--model_path', type=str, default='./checkpoints/best_model.pth',
-                        help='模型权重路径')
-    parser.add_argument('--in_channels', type=int, default=1, help='输入通道数')
-    parser.add_argument('--n_channels', type=int, default=32, help='基础通道数')
-    parser.add_argument('--n_classes', type=int, default=1, help='输出类别数')
+                        help='model checkpoint path')
+    parser.add_argument('--in_channels', type=int, default=1, help='input channels')
+    parser.add_argument('--n_channels', type=int, default=32, help='base channels')
+    parser.add_argument('--n_classes', type=int, default=1, help='number of classes')
     parser.add_argument('--predict_flow', action='store_true', default=True,
-                        help='是否预测梯度流场')
+                        help='predict gradient flow')
     parser.add_argument('--predict_cell_prob', action='store_true', default=False,
-                        help='是否预测细胞概率')
+                        help='predict cell probability')
     parser.add_argument('--deep_supervision', action='store_true', default=False,
-                        help='是否使用深层监督')
+                        help='use deep supervision')
 
-    parser.add_argument('--img_size', type=int, default=256, help='输入图像大小')
-    parser.add_argument('--threshold', type=float, default=0.5, help='分割阈值')
-    parser.add_argument('--gpu', type=int, default=0, help='GPU ID，-1表示CPU')
+    parser.add_argument('--img_size', type=int, default=256, help='input image size')
+    parser.add_argument('--threshold', type=float, default=0.5, help='segmentation threshold')
+    parser.add_argument('--gpu', type=int, default=0, help='GPU ID, -1 for CPU')
     parser.add_argument('--use_l2_pool', type=lambda x: x.lower() in ('true', '1', 'yes'), default=True,
-                        help='是否在 MSAS 中使用 L2 池化（True/False），需与训练时一致')
+                        help='use L2 pooling in MSAS (True/False), must match training')
 
     parser.add_argument('--max_samples', type=int, default=0,
-                        help='最多测试几张图（0表示全部）')
+                        help='max number of test images (0 = all)')
     parser.add_argument('--image_names', type=str, default='',
-                        help='指定测试的图片名称，多个用逗号分隔')
+                        help='comma-separated image names to test')
 
-    # 滑动窗口推理参数
+
     parser.add_argument('--use_sliding_window', action='store_true', default=False,
-                        help='是否使用滑动窗口推理（用于大图像）')
+                        help='use sliding window inference for large images')
     parser.add_argument('--patch_size', type=int, default=256,
-                        help='滑动窗口的patch大小')
+                        help='sliding window patch size')
     parser.add_argument('--stride', type=int, default=128,
-                        help='滑动窗口的步长')
+                        help='sliding window stride')
 
     return parser.parse_args()
 
 
-# ===================== 数据集 =====================
+
 
 class MedicalDataset(Dataset):
-    """医学图像分割数据集"""
+   
 
     def __init__(self, image_dir, mask_dir, img_size=256, image_names=None, max_samples=0, in_channels=1, use_sliding_window=False):
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.img_size = img_size
         self.in_channels = in_channels
-        self.use_sliding_window = use_sliding_window  # 新增：是否使用滑动窗口推理
+        self.use_sliding_window = use_sliding_window 
 
         self.all_images = [f for f in os.listdir(image_dir)
                           if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'))]
@@ -165,7 +142,7 @@ class MedicalDataset(Dataset):
             self.all_images = self.all_images[:max_samples]
 
         self.image_files = self.all_images
-        print(f"找到 {len(self.image_files)} 张图像 (输入通道: {in_channels})")
+        print(f"Found {len(self.image_files)} images (in_channels: {in_channels})")
 
     def __len__(self):
         return len(self.image_files)
@@ -174,7 +151,7 @@ class MedicalDataset(Dataset):
         img_name = self.image_files[idx]
         img_path = os.path.join(self.image_dir, img_name)
 
-        # 根据 in_channels 决定读取方式
+        
         if self.in_channels == 1:
             original_img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
             original_h, original_w = original_img.shape
@@ -201,7 +178,7 @@ class MedicalDataset(Dataset):
         else:
             mask = Image.new('L', (original_w, original_h), 0)
 
-        # 滑动窗口模式：保持原始尺寸，不resize
+       
         if not self.use_sliding_window:
             image = image.resize((self.img_size, self.img_size), Image.BILINEAR)
             mask = mask.resize((self.img_size, self.img_size), Image.NEAREST)
@@ -211,14 +188,14 @@ class MedicalDataset(Dataset):
 
         mask_np = (mask_np > 127).astype(np.float32)
 
-        # 归一化 - 对每个通道分别处理
+        
         if self.in_channels == 1:
             mean = image_np.mean()
             std = image_np.std()
             image_np = (image_np - mean) / (std + 1e-8)
             image_tensor = torch.from_numpy(image_np).unsqueeze(0)  # [1, H, W]
         else:
-            # RGB: 对每个通道分别归一化
+            
             for c in range(3):
                 mean = image_np[:, :, c].mean()
                 std = image_np[:, :, c].std()
@@ -237,10 +214,10 @@ class MedicalDataset(Dataset):
         }
 
 
-# ===================== 评估指标 =====================
+
 
 def dice_coefficient(pred, target, threshold=0.5):
-    """计算Dice系数"""
+   
     pred = (pred > threshold).float()
     smooth = 1e-5
     pred_flat = pred.view(-1)
@@ -250,7 +227,7 @@ def dice_coefficient(pred, target, threshold=0.5):
 
 
 def iou_coefficient(pred, target, threshold=0.5):
-    """计算IoU"""
+    
     pred = (pred > threshold).float()
     smooth = 1e-5
     pred_flat = pred.view(-1)
@@ -261,7 +238,7 @@ def iou_coefficient(pred, target, threshold=0.5):
 
 
 def precision_score(pred, target, threshold=0.5):
-    """计算Precision = TP / (TP + FP)"""
+    
     pred = (pred > threshold).float()
     smooth = 1e-5
     pred_flat = pred.view(-1)
@@ -272,7 +249,7 @@ def precision_score(pred, target, threshold=0.5):
 
 
 def recall_score(pred, target, threshold=0.5):
-    """计算Recall = TP / (TP + FN)"""
+    
     pred = (pred > threshold).float()
     smooth = 1e-5
     pred_flat = pred.view(-1)
@@ -283,7 +260,7 @@ def recall_score(pred, target, threshold=0.5):
 
 
 def specificity_score(pred, target, threshold=0.5):
-    """计算Specificity = TN / (TN + FP)"""
+    
     pred = (pred > threshold).float()
     smooth = 1e-5
     pred_flat = pred.view(-1)
@@ -294,21 +271,21 @@ def specificity_score(pred, target, threshold=0.5):
 
 
 def flow_mse(pred_flow, gt_flow):
-    """计算梯度流场 MSE"""
+    
     return F.mse_loss(pred_flow, gt_flow)
 
 
 def flow_cosine_similarity(pred_flow, gt_flow):
-    """计算梯度流场余弦相似度"""
+    
     B = pred_flow.shape[0]
     cos_sim = F.cosine_similarity(pred_flow, gt_flow, dim=1)
     return cos_sim.mean()
 
 
-# ===================== 批量测试 =====================
+
 
 def test_batch(model, dataloader, device, threshold=0.5, args=None):
-    """批量测试并计算指标"""
+    
     model.eval()
 
     all_dice = []
@@ -319,7 +296,7 @@ def test_batch(model, dataloader, device, threshold=0.5, args=None):
     all_flow_mse = []
     all_flow_cosine = []
     all_loss = []
-    sample_results = []  # 新增：存储每张图的指标用于CSV导出
+    sample_results = []  
 
     def bce_dice_loss(pred, target):
         bce = F.binary_cross_entropy_with_logits(pred, target)
@@ -333,7 +310,7 @@ def test_batch(model, dataloader, device, threshold=0.5, args=None):
 
     use_sliding_window = args is not None and getattr(args, 'use_sliding_window', False)
     if use_sliding_window:
-        print(f"使用滑动窗口推理: patch_size={args.patch_size}, stride={args.stride}")
+        print(f"Using sliding window inference: patch_size={args.patch_size}, stride={args.stride}")
 
     with torch.no_grad():
         for batch in pbar:
@@ -393,7 +370,7 @@ def test_batch(model, dataloader, device, threshold=0.5, args=None):
                     all_flow_mse.append(flow_mse_val)
                     all_flow_cosine.append(flow_cos_val)
 
-            # 记录单样本结果
+            
             sample_results.append({
                 'case_name': case_name,
                 'dice': round(dice, 4),
@@ -434,16 +411,16 @@ def test_batch(model, dataloader, device, threshold=0.5, args=None):
                      'std': np.std(all_flow_mse) if all_flow_mse else 0},
         'Flow_Cosine': {'mean': np.mean(all_flow_cosine) if all_flow_cosine else 0,
                         'std': np.std(all_flow_cosine) if all_flow_cosine else 0},
-        'sample_results': sample_results  # 新增：返回单样本结果
+        'sample_results': sample_results  
     }
 
     return results
 
 
 def save_results_to_csv(sample_results, save_path):
-    """将单样本结果保存为 CSV 文件"""
+    
     if not sample_results:
-        print("无结果可保存")
+        print("No results to save")
         return
 
     keys = ['case_name', 'dice', 'iou', 'precision', 'recall',
@@ -454,22 +431,22 @@ def save_results_to_csv(sample_results, save_path):
         for r in sample_results:
             f.write(','.join(str(r[k]) for k in keys) + '\n')
 
-    print(f"CSV 结果已保存到: {save_path}")
+    print(f"CSV results saved to: {save_path}")
 
 
-# ===================== 主函数 =====================
+
 
 def main():
     args = parse_args()
 
     if args.gpu >= 0 and torch.cuda.is_available():
         device = torch.device(f'cuda:{args.gpu}')
-        print(f"使用 GPU: {args.gpu}")
+        print(f"Using GPU: {args.gpu}")
     else:
         device = torch.device('cpu')
-        print("使用 CPU")
+        print("Using CPU")
 
-    print("创建模型...")
+    print("Creating model...")
     model = SGWDSNet(
         in_channels=args.in_channels,
         n_channels=args.n_channels,
@@ -481,28 +458,28 @@ def main():
     ).to(device)
 
     if os.path.exists(args.model_path):
-        print(f"加载模型权重: {args.model_path}")
+        print(f"Loading model weights: {args.model_path}")
         checkpoint = torch.load(args.model_path, map_location=device)
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
             if 'epoch' in checkpoint:
-                print(f"模型来自 Epoch {checkpoint.get('epoch', 'unknown')}")
+                print(f"Model from epoch {checkpoint.get('epoch', 'unknown')}")
         else:
             model.load_state_dict(checkpoint)
     else:
-        print(f"警告: 模型文件 {args.model_path} 不存在，使用随机初始化权重")
+        print(f"Warning: model file {args.model_path} not found, using random weights")
 
     dataset = MedicalDataset(args.image_dir, args.mask_dir, img_size=args.img_size,
                              image_names=args.image_names, max_samples=args.max_samples,
                              in_channels=args.in_channels,
-                             use_sliding_window=args.use_sliding_window)  # 传入滑动窗口参数
+                             use_sliding_window=args.use_sliding_window)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4)
 
-    print("\n批量测试...")
+    print("\nBatch testing...")
     results = test_batch(model, dataloader, device, args.threshold, args=args)
 
     print("\n" + "=" * 60)
-    print("测试结果")
+    print("Test results")
     print("=" * 60)
 
     for metric_name in ['Dice', 'IoU', 'Precision', 'Recall', 'Specificity']:
@@ -515,20 +492,20 @@ def main():
     print(f"\nFlow MSE: {results['Flow_MSE']['mean']:.6f}")
     print(f"Flow Cosine Similarity: {results['Flow_Cosine']['mean']:.4f}")
 
-    # 确保输出目录存在
+    
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # 保存 CSV 结果
+    
     if 'sample_results' in results and results['sample_results']:
         csv_path = os.path.join(args.output_dir, 'test_results.csv')
         save_results_to_csv(results['sample_results'], csv_path)
 
     result_file = os.path.join(args.output_dir, 'test_results.txt')
     with open(result_file, 'w') as f:
-        f.write("SGWDSNet 测试结果\n")
+        f.write("SGWDSNet test results\n")
         f.write("=" * 60 + "\n")
-        f.write(f"图像大小: {args.img_size}\n")
-        f.write(f"阈值: {args.threshold}\n")
+        f.write(f"Image size: {args.img_size}\n")
+        f.write(f"Threshold: {args.threshold}\n")
         f.write("=" * 60 + "\n\n")
         for metric_name in ['Dice', 'IoU', 'Precision', 'Recall', 'Specificity']:
             values = results[metric_name]
@@ -540,7 +517,7 @@ def main():
         f.write(f"Flow MSE: {results['Flow_MSE']['mean']:.6f}\n")
         f.write(f"Flow Cosine: {results['Flow_Cosine']['mean']:.4f}\n")
 
-    print(f"\n结果已保存到: {result_file}")
+    print(f"\nResults saved to: {result_file}")
 
 
 if __name__ == '__main__':
