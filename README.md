@@ -26,9 +26,8 @@ data/
 2. **Filename Matching**: The filenames of the images and their corresponding masks must be identical (e.g., `case_0001.nii.gz`).
 
 ##  🐋Training
-🐋 **1. Grayscale Images (Long or Width < 1000)**
-
-**Datasets: BUSI, TN3K, DDTI, etc.**
+###🐋 1. Grayscale Images (Long or Width < 1000)
+Datasets: BUSI, TN3K, DDTI, etc.
 
 ```bash
 python train.py \
@@ -40,9 +39,8 @@ python train.py \
 --output_dir ./checkpoints/BUSI/best_model.pth  \
 ```
 
-🐋 **2. RGB Images (Long or Width < 1000)**
-
-**CVC-ColonDB, CVC-ClinicDB, etc.**
+###🐋 2. RGB Images (Long or Width < 1000)
+Datasets: MoNuSeg, CoNSeP, etc.
 
 ```bash
 python train.py \
@@ -55,9 +53,8 @@ python train.py \
 --output_dir ./checkpoints/CVC-ColonDB/best_model.pth  \
 ```
 
-🐋 **3. RGB Images (Long or Width >= 1000)**
-
-**Datasets: MoNuSeg, CoNSeP, etc.**
+### 🐋3. RGB Images (Long or Width >= 1000)
+Datasets: MoNuSeg, CoNSeP, etc.
 
 ```bash
 python train.py \
@@ -83,3 +80,55 @@ If you want to directly test with our trained weights, please download them from
 
 After downloading, please put the weights in the `checkpoints/` directory.
 
+## 🐳 Testing
+
+### 🐳 1. Grayscale Images (Long or Width < 1000)
+Datasets: BUSI, TN3K, DDTI, etc.
+
+```bash
+python test.py \
+  --image_dir ./BUSI/test/images \
+  --mask_dir ./BUSI/test/masks \
+  --model_path ./checkpoints/BUSI/best_model.pth \
+  --gpu 0 \
+  --output_dir ./results/BUSI
+```
+
+### 🐳 2. RGB Images (Long or Width < 1000)
+Datasets: CVC-ColonDB, CVC-ClinicDB, etc.
+
+```bash
+python test.py \
+  --image_dir ./CVC-ColonDB/test/images \
+  --mask_dir ./CVC-ColonDB/test/masks \
+  --in_channels 3 \
+  --model_path ./checkpoints/CVC-ColonDB/best_model.pth \
+  --gpu 0 \
+  --output_dir ./results/CVC-ColonDB
+```
+
+### 🐳 3. RGB Images (Long or Width >= 1000)
+Datasets: MoNuSeg, CoNSeP, etc.
+
+```bash
+python test.py \
+  --image_dir ./MoNuSeg/test/images \
+  --mask_dir ./MoNuSeg/test/masks \
+  --in_channels 3 \
+  --use_sliding_window \
+  --patch_size 256 \
+  --stride 128 \
+  --model_path ./checkpoints/MoNuSeg/best_model.pth \
+  --gpu 0 \
+  --output_dir ./results/MoNuSeg
+```
+
+## 🐬 Acknowledgement
+
+We thank the authors of public datasets (e.g., BUSI, TN3K, CVC-ClinicDB, MoNuSeg) for making their data publicly available.
+
+## 🐬 IAAx Dataset Download
+
+- **Baidu Netdisk:** [Download](你的百度网盘链接) (Access Code: 你的提取码)
+
+We also thank the open-source community for their valuable contributions.
