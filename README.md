@@ -1,5 +1,13 @@
 # 🦈 A Unified Framework for Segmenting Subtle Anatomical Structures
 
+## 🐠 Requirements
+
+```bash
+conda create -n SGWDS-Net python=3.10
+conda activate SGWDS-Net
+pip install -r requirements.txt
+```
+
 ## 🐟 Dataset Format 🐟
 ```text
 data/
@@ -26,7 +34,7 @@ data/
 2. **Filename Matching**: The filenames of the images and their corresponding masks must be identical (e.g., case_0001.nii.gz).
 
 ##  🐋Training
-###🐋 1. Grayscale Images (Long or Width < 1000)
+### 🐋 1. Grayscale Images (Long or Width < 1000)
 Datasets: BUSI, TN3K, DDTI, etc.
 
 ```bash
@@ -39,7 +47,7 @@ python train.py \
 --output_dir ./checkpoints/BUSI/best_model.pth  \
 ```
 
-###🐋 2. RGB Images (Long or Width < 1000)
+### 🐋 2. RGB Images (Long or Width < 1000)
 Datasets: MoNuSeg, CoNSeP, etc.
 
 ```bash
