@@ -3,8 +3,10 @@
 ## 🐠 Requirements
 
 ```bash
+# Create and activate conda environment (tested on RTX 4090 GPU)
 conda create -n SGWDS-Net python=3.10
 conda activate SGWDS-Net
+pip install torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 ```
 
